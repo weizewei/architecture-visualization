@@ -1,121 +1,113 @@
 ---
 name: architecture-visualization
 description: >-
-  Visualizes system architecture, call chains, data/sync flows, module
-  dependencies, and event pipelines as an interactive Cursor Canvas SVG DAG
-  with click-to-open source (useCanvasAction openFile). Use when the user
-  asks to draw architecture, visualize a flow/pipeline, map module
-  dependencies, explain how a feature works end-to-end, wants clickable
-  nodes that jump to code, or mentions 架构图 / 链路图 / 调用链 /
-  architecture diagram / flow diagram / ContextWeave.
+  Visualizes system architecture, call chains, data/sync pipelines, module
+  dependencies, and event flows as an interactive Cursor Canvas SVG DAG with
+  click-to-open source (useCanvasAction openFile). Use when the user asks to
+  draw or visualize architecture, 架构图, 链路图, 调用链, 同步链路, 流程图,
+  模块依赖, end-to-end flow, clickable diagram, architecture diagram,
+  flow diagram, or ContextWeave-style diagrams.
 ---
 
 # Architecture Visualization (ContextWeave-style)
 
-Produce an **interactive Cursor Canvas**: SVG DAG + **click node → open source in IDE**.
+Interactive **Cursor Canvas**: SVG DAG + **click node → open source** in the IDE.
 
-Uses built-in `useCanvasAction` → `{ type: "openFile", path, selection? }`. No Feishu, no external MCP, no VSIX jump plugin.
+Jump via built-in `useCanvasAction` → `{ type: "openFile", path, selection? }`.  
+No Feishu, no external MCP, no VSIX.
 
-## When to use
+## When to use / skip
 
-- Architecture / module dependency maps
-- Business → event → consumer → storage sync chains
-- Call / data / state flows across services or packages
-- "How does X work end-to-end?" with a visual, clickable answer
+**Use:** architecture maps, sync/event pipelines, call/data flows, “X 怎么端到端跑通” with a clickable diagram.
 
-Skip when the user only wants a short textual explanation, or explicitly asks for Mermaid / 飞书画板 (then follow those tools instead).
+**Skip:** short text-only answers; user explicitly wants Mermaid / 飞书画板 (use those tools instead).
 
 ## Workflow
 
 ```
 Architecture viz:
-- [ ] 1. Scope the graph
-- [ ] 2. Gather facts + line anchors from code
-- [ ] 3. Build nodes + edges (path/line required when known)
-- [ ] 4. Write interactive Canvas (DAG + openFile)
-- [ ] 5. Link the canvas in the reply
+- [ ] 1. Scope
+- [ ] 2. Trace code + path:line
+- [ ] 3. Nodes / edges
+- [ ] 4. Interactive canvas
+- [ ] 5. Reply with canvas link
 ```
 
-### 1. Scope the graph
+### 1. Scope
 
-Ask only if the scope is ambiguous. Default to the **narrowest useful slice** for the latest question, not the whole monorepo.
+- Default: **narrowest slice** for the latest question (one feature / one pipeline).
+- Ask only if scope is ambiguous.
+- Direction: pipeline/sync/call chain → `horizontal`; layered UI→DB → `vertical`.
 
-Direction:
-- Pipeline / sync / call chain → `direction: "horizontal"`
-- Layered architecture → `direction: "vertical"`
+### 2. Trace code
 
-### 2. Gather facts from code
+1. Start from named entry, focused file, or recent discussion.
+2. Walk one hop at a time (call / publish / consume / write).
+3. Real symbols only — never invent services, queues, or DBs.
+4. Per code-backed node:
+   - `path`: **absolute** if multi-root workspace; else workspace-relative
+   - `line`: 1-based line of the key symbol when known
+5. **6–20 nodes**. Collapse the rest; note what was collapsed in the caption.
 
-1. Grep / read entry points the user named (or open file / recent discussion).
-2. Trace one hop at a time: caller → callee, publish → consume, write → store.
-3. Prefer **real symbols** (class/method/event name) over invented boxes.
-4. For every code-backed node, record:
-   - **path**: prefer **absolute** path (multi-root workspaces); else workspace-relative
-   - **line**: 1-based line of the key symbol (function/class/const), when known
-5. Cap **6–20 nodes**. Collapse extras; note what was collapsed.
+**Multi-root:** resolve files under the correct root (e.g. `WebDev/...` vs `realtime_censor/...`); prefer absolute paths so `openFile` does not miss.
 
-Do **not** invent services, queues, or DBs that are not evidenced in code or by the user.
-
-### 3. Build nodes + edges
+### 3. Graph model
 
 ```ts
 type ArchNode = {
   id: string;
-  label: string;
-  detail?: string;
-  path?: string;       // absolute preferred when jumpable
-  line?: number;       // 1-based; used in openFile selection
+  label: string;       // short
+  detail?: string;     // one line
+  path?: string;       // jumpable if set
+  line?: number;       // 1-based
   kind?: "entry" | "service" | "event" | "consumer" | "store" | "job" | "other";
 };
 
 type ArchEdge = {
   from: string;
   to: string;
-  label?: string;
+  label?: string;      // e.g. publish / upsert by _id
 };
 ```
 
-Every node with a real `path` **must** be clickable. Nodes without `path` (pure logical boxes) are not jumpable — show normal cursor, no fake links.
+- `path` set ⇒ node **must** be clickable.
+- No `path` ⇒ logical box only (default cursor, no fake jump).
 
-### 4. Write the Canvas
+### 4. Canvas (required)
 
-**Mandatory:**
-1. Read `~/.cursor/skills-cursor/canvas/SKILL.md` and follow it.
-2. Write one file under  
-   `/Users/<user>/.cursor/projects/<workspace>/canvases/<name>.canvas.tsx`
-3. Import only from `cursor/canvas`. Embed graph data inline.
-4. Layout with `computeDAGLayout`; render SVG; wire jumps via `useCanvasAction` (see [canvas-dag.md](canvas-dag.md)).
-5. Title + one-line caption (scope + "click a node to open source").
-6. Detail strip below/beside graph: selected node label, path, line; `Button` "Open in editor" when `path` exists.
-7. Optional `Table` of nodes; path cells / rows also dispatch `openFile`.
+1. Read `~/.cursor/skills-cursor/canvas/SKILL.md` first.
+2. Write **one** file:  
+   `/Users/<user>/.cursor/projects/<workspace>/canvases/<kebab-name>.canvas.tsx`  
+   (do not mkdir; managed dir).
+3. Import **only** `cursor/canvas`; embed data inline; no `fetch`.
+4. Layout with `computeDAGLayout`; render SVG; wire jumps — follow [canvas-dag.md](canvas-dag.md).
+5. UI must include:
+   - Title + caption (`Source: … · 点击节点打开源码`)
+   - SVG DAG (back-edges dashed)
+   - Hover highlight (`fill.tertiary`) + selected stroke (`accent.primary`)
+   - Click jumpable node → select + `openFile` (with `selection` when `line` known)
+   - Detail `Callout` + **Open in editor** `Button`
+   - Jump list: `Pill`/`Button` per jumpable node (Table has no row onClick)
 
-**Interaction (required — ContextWeave parity):**
-- Click jumpable SVG node → `dispatch({ type: "openFile", path, selection? })` and set selected id (`useCanvasState`).
-- Optional `selection`: `{ startLineNumber, startColumn: 1, endLineNumber, endColumn: 1 }` when `line` is known (VS Code-style).
-- Hover: pointer cursor + light `fill.tertiary` (tokens only).
-- Selected: `stroke` / `accent.primary` highlight.
-- Back-edges: dashed stroke.
-- Keyboard/secondary: same `openFile` from detail `Button` and table.
+**Theme:** only `useHostTheme()` tokens (`text.*` `bg.*` `fill.*` `stroke.*` `accent.*`).  
+No gradients, emojis, box-shadows, rainbow kinds (accent sparingly on `entry`/`store` or selected).
 
-**Design:**
-- Colors from `useHostTheme()` only (`text.*`, `bg.*`, `fill.*`, `stroke.*`, `accent.*`).
-- No gradients, emojis, box-shadows, rainbow colors.
-- Never empty canvas; ask if facts are missing.
+**Empty:** never ship placeholders — ask for missing facts instead.
 
 ### 5. Reply
 
-- One or two sentences summarizing the flow.
-- Note that nodes with source paths are clickable.
-- Markdown link to the `.canvas.tsx` (full absolute path).
-- First canvas in workspace: one sentence on what a canvas is.
+- 1–2 sentences summarizing the flow.
+- Say nodes with paths are clickable.
+- Markdown link to the `.canvas.tsx` (**full absolute path**).
+- First canvas in that workspace: one sentence on what a canvas is.
 
 ## Iteration
 
-- Same topic refine → edit the same canvas file.
-- New topic → new filename.
+- Same topic → edit the **same** canvas file.
+- New topic → new kebab filename.
 
 ## Out of scope
 
-- Feishu / Figma publish
-- Third-party jump VSIX / ContextWeave MCP API keys
+- Feishu / Figma publish  
+- Third-party jump plugins / ContextWeave API keys  
 - Infra diagrams without code evidence

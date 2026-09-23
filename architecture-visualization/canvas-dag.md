@@ -1,6 +1,6 @@
 # Interactive Canvas DAG + openFile
 
-ContextWeave-style pattern: SVG graph + click → IDE source.
+Pattern: SVG graph + click → IDE source (`useCanvasAction`).
 
 ## Jump API
 
@@ -9,7 +9,7 @@ const dispatch = useCanvasAction();
 
 dispatch({
   type: "openFile",
-  path: "/Users/you/Code/WebDev/qianxun/facade/es/SyncApi.php", // absolute preferred
+  path: "/abs/or/workspace-relative/path/File.php",
   selection: {
     startLineNumber: 34,
     startColumn: 1,
@@ -19,10 +19,12 @@ dispatch({
 });
 ```
 
-- Omit `selection` when line is unknown.
-- `path` may be workspace-relative; absolute is safer with multi-root workspaces.
+- Omit `selection` when `line` unknown.
+- Prefer **absolute** `path` in multi-root workspaces.
 
 ## Template
+
+Replace `NODES` / `EDGES` / title with real traced data. Keep interaction wiring.
 
 ```tsx
 import {
@@ -32,13 +34,14 @@ import {
   H1,
   H2,
   Text,
-  Table,
   Button,
+  Pill,
   Callout,
   useHostTheme,
   useCanvasAction,
   useCanvasState,
   type DAGLayoutEdge,
+  type CanvasAction,
 } from "cursor/canvas";
 
 type Kind = "entry" | "service" | "event" | "consumer" | "store" | "job" | "other";
@@ -52,33 +55,31 @@ type ArchNode = {
   kind?: Kind;
 };
 
+/** Replace with facts from code — no invented boxes. */
 const NODES: ArchNode[] = [
   {
-    id: "trigger",
-    label: "triggerInfoSync",
-    detail: "MetaService",
+    id: "entry",
+    label: "Entry",
+    detail: "trigger",
     kind: "entry",
-    path: "/Users/you/Code/WebDev/qianxun/facade/meta/service/MetaService.php",
-    line: 23,
+    path: "/ABS/path/Entry.php",
+    line: 10,
   },
   {
-    id: "sync",
-    label: "Es SyncApi",
-    detail: "updateDocument",
+    id: "store",
+    label: "Store",
+    detail: "persist",
     kind: "store",
-    path: "/Users/you/Code/WebDev/qianxun/facade/es/SyncApi.php",
-    line: 34,
+    path: "/ABS/path/Store.php",
+    line: 20,
   },
 ];
 
-const EDGES = [
-  { from: "trigger", to: "sync", label: "…via consumer" },
-] as const;
+const EDGES: Array<{ from: string; to: string; label?: string }> = [
+  { from: "entry", to: "store", label: "write" },
+];
 
-function openSource(
-  dispatch: (a: { type: "openFile"; path: string; selection?: object }) => void,
-  node: ArchNode,
-) {
+function openSource(dispatch: (a: CanvasAction) => void, node: ArchNode) {
   if (!node.path) return;
   if (node.line && node.line > 0) {
     dispatch({
@@ -100,6 +101,7 @@ export default function ArchitectureCanvas() {
   const theme = useHostTheme();
   const dispatch = useCanvasAction();
   const [selectedId, setSelectedId] = useCanvasState<string | null>("selected-node", null);
+  const [hoverId, setHoverId] = useCanvasState<string | null>("hover-node", null);
 
   const nodeW = 168;
   const nodeH = 56;
@@ -116,20 +118,35 @@ export default function ArchitectureCanvas() {
 
   const byId = Object.fromEntries(NODES.map((n) => [n.id, n]));
   const selected = selectedId ? byId[selectedId] : undefined;
-  const edgeLabel = Object.fromEntries(EDGES.map((e) => [`${e.from}->${e.to}`, e.label]));
+  const edgeLabel = Object.fromEntries(
+    EDGES.filter((e) => e.label).map((e) => [`${e.from}->${e.to}`, e.label!]),
+  );
+  const jumpable = NODES.filter((n) => n.path);
 
   return (
     <Stack gap={20}>
       <Stack gap={6}>
-        <H1>Example flow</H1>
+        <H1>Flow title</H1>
         <Text tone="secondary" size="small">
-          Source: codebase · click a node to open source
+          Source: codebase · 点击节点打开源码
         </Text>
       </Stack>
 
-      <svg width={layout.width} height={layout.height} style={{ maxWidth: "100%" }}>
+      <svg
+        width={layout.width}
+        height={layout.height}
+        style={{ maxWidth: "100%" }}
+        onMouseLeave={() => setHoverId(null)}
+      >
         <defs>
-          <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <marker
+            id="arch-arrow"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
             <path d="M0,0 L6,3 L0,6 Z" fill={theme.stroke.primary} />
           </marker>
         </defs>
@@ -148,10 +165,16 @@ export default function ArchitectureCanvas() {
                 stroke={theme.stroke.primary}
                 strokeWidth={1.5}
                 strokeDasharray={e.isBackEdge ? "4 4" : undefined}
-                markerEnd="url(#arrow)"
+                markerEnd="url(#arch-arrow)"
               />
               {edgeLabel[key] ? (
-                <text x={midX} y={midY - 6} textAnchor="middle" fill={theme.text.secondary} fontSize={11}>
+                <text
+                  x={midX}
+                  y={midY - 6}
+                  textAnchor="middle"
+                  fill={theme.text.secondary}
+                  fontSize={11}
+                >
                   {edgeLabel[key]}
                 </text>
               ) : null}
@@ -161,38 +184,56 @@ export default function ArchitectureCanvas() {
 
         {layout.nodes.map((n) => {
           const meta = byId[n.id];
-          const jumpable = Boolean(meta?.path);
+          const canJump = Boolean(meta?.path);
           const isSelected = selectedId === n.id;
-          const stroke = isSelected
+          const isHover = hoverId === n.id;
+          const stroke = isSelected || meta?.kind === "entry" || meta?.kind === "store"
             ? theme.accent.primary
-            : meta?.kind === "store"
-              ? theme.accent.primary
-              : theme.stroke.primary;
+            : theme.stroke.primary;
+          const fill = isSelected || isHover ? theme.fill.tertiary : theme.bg.elevated;
 
           return (
             <g
               key={n.id}
               transform={`translate(${n.x}, ${n.y})`}
-              style={{ cursor: jumpable ? "pointer" : "default" }}
+              style={{ cursor: canJump ? "pointer" : "default" }}
+              onMouseEnter={() => setHoverId(n.id)}
               onClick={() => {
                 setSelectedId(n.id);
                 if (meta) openSource(dispatch, meta);
               }}
             >
-              <title>{meta?.path ? `${meta.path}${meta.line ? `:${meta.line}` : ""}` : meta?.label}</title>
+              <title>
+                {meta?.path
+                  ? `${meta.path}${meta.line ? `:${meta.line}` : ""}`
+                  : meta?.label}
+              </title>
               <rect
                 width={nodeW}
                 height={nodeH}
                 rx={6}
-                fill={isSelected ? theme.fill.tertiary : theme.bg.elevated}
+                fill={fill}
                 stroke={stroke}
                 strokeWidth={isSelected ? 2 : 1.5}
               />
-              <text x={nodeW / 2} y={22} textAnchor="middle" fill={theme.text.primary} fontSize={13} fontWeight={600}>
+              <text
+                x={nodeW / 2}
+                y={22}
+                textAnchor="middle"
+                fill={theme.text.primary}
+                fontSize={13}
+                fontWeight={600}
+              >
                 {meta?.label ?? n.id}
               </text>
               {meta?.detail ? (
-                <text x={nodeW / 2} y={40} textAnchor="middle" fill={theme.text.secondary} fontSize={11}>
+                <text
+                  x={nodeW / 2}
+                  y={40}
+                  textAnchor="middle"
+                  fill={theme.text.secondary}
+                  fontSize={11}
+                >
                   {meta.detail}
                 </text>
               ) : null}
@@ -207,15 +248,12 @@ export default function ArchitectureCanvas() {
             <Text size="small">
               {selected.path
                 ? `${selected.path}${selected.line ? `:${selected.line}` : ""}`
-                : "No source path for this node"}
+                : "该节点无源码路径"}
             </Text>
             {selected.path ? (
               <Row gap={8}>
-                <Button
-                  variant="primary"
-                  onClick={() => openSource(dispatch, selected)}
-                >
-                  Open in editor
+                <Button variant="primary" onClick={() => openSource(dispatch, selected)}>
+                  在编辑器中打开
                 </Button>
               </Row>
             ) : null}
@@ -223,38 +261,47 @@ export default function ArchitectureCanvas() {
         </Callout>
       ) : (
         <Text tone="secondary" size="small">
-          Select a node to jump to its source file.
+          选中节点可跳转源码
         </Text>
       )}
 
-      <Stack gap={8}>
-        <H2>Nodes</H2>
-        <Table
-          headers={["Node", "Role", "Path"]}
-          rows={NODES.map((n) => [
-            n.label,
-            n.detail ?? "",
-            n.path ? `${n.path}${n.line ? `:${n.line}` : ""}` : "—",
-          ])}
-          // If Table supports row onClick in current SDK, wire openSource there too.
-          // Otherwise keep Open via SVG / Callout Button only.
-        />
-      </Stack>
+      {jumpable.length > 0 ? (
+        <Stack gap={8}>
+          <H2>源码跳转</H2>
+          <Row gap={8} wrap>
+            {jumpable.map((n) => (
+              <Pill
+                key={n.id}
+                active={selectedId === n.id}
+                onClick={() => {
+                  setSelectedId(n.id);
+                  openSource(dispatch, n);
+                }}
+              >
+                {n.label}
+              </Pill>
+            ))}
+          </Row>
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
 ```
 
-## Checklist before shipping
+## Shipping checklist
 
-- [ ] Jumpable nodes have real `path` (absolute when multi-root)
+- [ ] Every jumpable node has a real `path` (absolute if multi-root)
 - [ ] `line` set when the symbol line is known
-- [ ] Click node opens file (and selects line when provided)
-- [ ] Selected state + "Open in editor" button
-- [ ] Caption mentions click-to-open
+- [ ] Click node → `openFile` (+ line selection when known)
+- [ ] Hover + selected styles; dashed back-edges
+- [ ] Callout + 在编辑器中打开; Pill jump list
+- [ ] Caption includes 点击节点打开源码
 - [ ] Theme tokens only; no gradients / emojis / box-shadow
+- [ ] If `CanvasAction` / selection types fail check, fall back to `path`-only `openFile`
 
 ## Notes
 
-- Confirm `Callout` / `Button` / `Table` props in `~/.cursor/skills-cursor/canvas/sdk/ui-primitives.d.ts` if typecheck fails.
-- If `openFile` selection shape drifts, keep `path`-only jump as fallback.
+- Marker id `arch-arrow` avoids clashes if the page has multiple SVGs.
+- Confirm props in `~/.cursor/skills-cursor/canvas/sdk/*.d.ts` when typecheck fails.
+- Do not use `Table` for jumps — it has no row `onClick`; use `Pill` / `Button`.
